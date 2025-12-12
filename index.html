@@ -657,14 +657,15 @@
     </main>
 
     <script>
-        // API URL
-        const API_URL = 'http://localhost:3000/api';
+        // Database - используем localStorage для имитации базы данных
+        let users = JSON.parse(localStorage.getItem('users')) || [
+            { email: 'admin@admin.com', password: 'admin123', isAdmin: true }
+        ];
+        let bookings = JSON.parse(localStorage.getItem('bookings')) || [];
+        let holidays = JSON.parse(localStorage.getItem('holidays')) || [];
+        let customHours = JSON.parse(localStorage.getItem('customHours')) || {};
         
-        // State
-        let currentUser = JSON.parse(sessionStorage.getItem('currentUser')) || null;
-        let bookings = [];
-        let holidays = [];
-        let customHours = {};
+        let currentUser = JSON.parse(localStorage.getItem('currentUser')) || null;
         let isLoginMode = true;
         let selectedSlot = null;
         let currentService = null;
@@ -675,41 +676,13 @@
             chemical: { name: 'Химчистка', duration: 3, price: '60€' }
         };
 
-        // Загрузка данных с сервера
-        async function loadBookings() {
-            try {
-                const res = await fetch(`${API_URL}/bookings`);
-                bookings = await res.json();
-                if (currentService) renderCalendar();
-            } catch (error) {
-                console.error('Ошибка загрузки записей:', error);
-            }
-        }
-
-        async function loadHolidays() {
-            try {
-                const res = await fetch(`${API_URL}/holidays`);
-                holidays = await res.json();
-            } catch (error) {
-                console.error('Ошибка загрузки выходных:', error);
-            }
-        }
-
-        async function loadCustomHours() {
-            try {
-                const res = await fetch(`${API_URL}/custom-hours`);
-                customHours = await res.json();
-            } catch (error) {
-                console.error('Ошибка загрузки часов:', error);
-            }
-        }
-
-        // Инициализация
-        async function init() {
-            await loadBookings();
-            await loadHolidays();
-            await loadCustomHours();
-            updateUI();
+        // Сохранение в БД
+        function saveToDatabase() {
+            localStorage.setItem('users', JSON.stringify(users));
+            localStorage.setItem('bookings', JSON.stringify(bookings));
+            localStorage.setItem('holidays', JSON.stringify(holidays));
+            localStorage.setItem('customHours', JSON.stringify(customHours));
+            localStorage.setItem('currentUser', JSON.stringify(currentUser));
         }
 
         // Menu
@@ -738,7 +711,7 @@
             document.getElementById('authToggleText').textContent = isLoginMode ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Войти';
         }
 
-        async function handleAuth() {
+        function handleAuth() {
             const email = document.getElementById('authEmail').value;
             const password = document.getElementById('authPassword').value;
 
@@ -752,34 +725,28 @@
                 return;
             }
 
-            try {
-                const endpoint = isLoginMode ? '/login' : '/register';
-                const res = await fetch(`${API_URL}${endpoint}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    alert(data.error);
+            if (isLoginMode) {
+                const user = users.find(u => u.email === email && u.password === password);
+                if (user) {
+                    currentUser = user;
+                    saveToDatabase();
+                    updateUI();
+                    closeAuth();
+                } else {
+                    alert('Неверный email или пароль');
+                }
+            } else {
+                if (users.find(u => u.email === email)) {
+                    alert('Пользователь с таким email уже существует');
                     return;
                 }
-
-                if (isLoginMode) {
-                    currentUser = { email: data.email, isAdmin: data.isAdmin };
-                } else {
-                    currentUser = { email, isAdmin: false };
-                    alert('Регистрация успешна!');
-                }
-
-                sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+                const newUser = { email, password, isAdmin: false };
+                users.push(newUser);
+                currentUser = newUser;
+                saveToDatabase();
                 updateUI();
                 closeAuth();
-            } catch (error) {
-                alert('Ошибка подключения к серверу');
-                console.error(error);
+                alert('Регистрация успешна!');
             }
         }
 
@@ -793,37 +760,25 @@
             document.getElementById('forgotEmail').value = '';
         }
 
-        async function handleForgotPassword() {
+        function handleForgotPassword() {
             const email = document.getElementById('forgotEmail').value;
             if (!email) {
                 alert('Введите email');
                 return;
             }
 
-            try {
-                const res = await fetch(`${API_URL}/forgot-password`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email })
-                });
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    alert(data.error);
-                    return;
-                }
-
-                alert(`${data.message}\nВременный пароль: ${data.tempPassword}`);
+            const user = users.find(u => u.email === email);
+            if (user) {
+                alert(`Инструкции по восстановлению пароля отправлены на ${email}\n\n(В демо-версии ваш пароль: ${user.password})`);
                 closeForgotPassword();
-            } catch (error) {
-                alert('Ошибка подключения к серверу');
+            } else {
+                alert('Пользователь с таким email не найден');
             }
         }
 
         function logout() {
             currentUser = null;
-            sessionStorage.removeItem('currentUser');
+            saveToDatabase();
             updateUI();
         }
 
@@ -969,13 +924,8 @@
                             clickable = true;
                         }
 
-                        // Проверяем, входит ли эта ячейка в выбранный диапазон
-                        if (selectedSlot && selectedSlot.date === dateStr) {
-                            const selectedHour = parseInt(selectedSlot.time.split(':')[0]);
-                            const duration = services[currentService].duration;
-                            if (hour >= selectedHour && hour < selectedHour + duration) {
-                                cellClass += ' selected';
-                            }
+                        if (selectedSlot && selectedSlot.date === dateStr && selectedSlot.time === timeStr) {
+                            cellClass += ' selected';
                         }
                     }
 
@@ -996,25 +946,6 @@
         }
 
         function selectSlot(date, time) {
-            const hour = parseInt(time.split(':')[0]);
-            const duration = services[currentService].duration;
-            
-            // Проверяем, что все ячейки в диапазоне свободны
-            for (let h = hour; h < hour + duration; h++) {
-                const checkTime = `${h.toString().padStart(2, '0')}:00`;
-                const isBooked = bookings.some(b => {
-                    if (b.date !== date) return false;
-                    const bookingStart = parseInt(b.time.split(':')[0]);
-                    const bookingEnd = bookingStart + services[b.service].duration;
-                    return h >= bookingStart && h < bookingEnd;
-                });
-                
-                if (isBooked) {
-                    alert('Выбранный временной слот недоступен. Пожалуйста, выберите другое время.');
-                    return;
-                }
-            }
-            
             selectedSlot = { date, time };
             renderCalendar();
         }
@@ -1032,7 +963,7 @@
             }).length;
         }
 
-        async function confirmBooking() {
+        function confirmBooking() {
             if (!selectedSlot) {
                 alert('Выберите время для записи');
                 return;
@@ -1047,41 +978,31 @@
                 return;
             }
 
-            try {
-                const res = await fetch(`${API_URL}/bookings`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: currentUser.email,
-                        service: currentService,
-                        date: selectedSlot.date,
-                        time: selectedSlot.time,
-                        car,
-                        phone,
-                        telegram
-                    })
-                });
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    alert(data.error);
-                    return;
-                }
-
-                alert('Запись успешно создана!');
-                await loadBookings();
-                closeServiceModal();
-            } catch (error) {
-                alert('Ошибка подключения к серверу');
+            const weeklyBookings = getUserWeeklyBookings(currentUser.email, selectedSlot.date);
+            if (weeklyBookings >= 2) {
+                alert('Максимум 2 записи в неделю');
+                return;
             }
+
+            bookings.push({
+                id: Date.now(),
+                email: currentUser.email,
+                service: currentService,
+                date: selectedSlot.date,
+                time: selectedSlot.time,
+                car,
+                phone,
+                telegram
+            });
+
+            saveToDatabase();
+            alert('Запись успешно создана!');
+            closeServiceModal();
         }
 
         // Admin
-        async function showAdmin() {
+        function showAdmin() {
             document.getElementById('adminModal').classList.add('show');
-            await loadBookings();
-            await loadHolidays();
             updateHolidaysList();
             updateAllBookings();
         }
@@ -1090,35 +1011,20 @@
             document.getElementById('adminModal').classList.remove('show');
         }
 
-        async function addHoliday() {
+        function addHoliday() {
             const date = document.getElementById('holidayDate').value;
-            if (!date) return;
-
-            try {
-                const res = await fetch(`${API_URL}/holidays`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ date })
-                });
-
-                if (res.ok) {
-                    await loadHolidays();
-                    updateHolidaysList();
-                    document.getElementById('holidayDate').value = '';
-                }
-            } catch (error) {
-                alert('Ошибка добавления выходного дня');
+            if (date && !holidays.includes(date)) {
+                holidays.push(date);
+                saveToDatabase();
+                updateHolidaysList();
+                document.getElementById('holidayDate').value = '';
             }
         }
 
-        async function removeHoliday(date) {
-            try {
-                await fetch(`${API_URL}/holidays/${date}`, { method: 'DELETE' });
-                await loadHolidays();
-                updateHolidaysList();
-            } catch (error) {
-                alert('Ошибка удаления');
-            }
+        function removeHoliday(date) {
+            holidays = holidays.filter(d => d !== date);
+            saveToDatabase();
+            updateHolidaysList();
         }
 
         function updateHolidaysList() {
@@ -1131,37 +1037,22 @@
             `).join('');
         }
 
-        async function setCustomHour() {
+        function setCustomHour() {
             const date = document.getElementById('customHourDate').value;
             const hour = document.getElementById('customHour').value;
-            if (!date || !hour) return;
-
-            try {
-                const res = await fetch(`${API_URL}/custom-hours`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ date, startHour: parseInt(hour) })
-                });
-
-                if (res.ok) {
-                    await loadCustomHours();
-                    document.getElementById('customHourDate').value = '';
-                    document.getElementById('customHour').value = '';
-                    alert('Время начала работы установлено');
-                }
-            } catch (error) {
-                alert('Ошибка установки времени');
+            if (date && hour) {
+                customHours[date] = parseInt(hour);
+                saveToDatabase();
+                document.getElementById('customHourDate').value = '';
+                document.getElementById('customHour').value = '';
+                alert('Время начала работы установлено');
             }
         }
 
-        async function deleteBooking(id) {
-            try {
-                await fetch(`${API_URL}/bookings/${id}`, { method: 'DELETE' });
-                await loadBookings();
-                updateAllBookings();
-            } catch (error) {
-                alert('Ошибка удаления');
-            }
+        function deleteBooking(id) {
+            bookings = bookings.filter(b => b.id !== id);
+            saveToDatabase();
+            updateAllBookings();
         }
 
         function updateAllBookings() {
@@ -1170,8 +1061,8 @@
                 <div class="booking-item">
                     <p><strong>${services[b.service].name}</strong></p>
                     <p>Дата: ${b.date} в ${b.time}</p>
-                    <p>Email: ${b.user_email}</p>
-                    <p>Машина: ${b.car_model}</p>
+                    <p>Email: ${b.email}</p>
+                    <p>Машина: ${b.car}</p>
                     ${b.phone ? `<p>Телефон: ${b.phone}</p>` : ''}
                     ${b.telegram ? `<p>Telegram: ${b.telegram}</p>` : ''}
                     <button class="btn-delete" onclick="deleteBooking(${b.id})">Удалить</button>
@@ -1180,7 +1071,7 @@
         }
 
         // Initialize
-        init();
+        updateUI();
     </script>
 </body>
 </html>
